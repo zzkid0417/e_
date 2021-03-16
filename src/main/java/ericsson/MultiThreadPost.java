@@ -5,10 +5,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * @Date 2021/3/12
+ * @Date 2021/3/16
  */
 public class MultiThreadPost {
 	private int cntThreads;
@@ -21,15 +22,16 @@ public class MultiThreadPost {
 	 */
 	public MultiThreadPost(int nThreads) {
 		this.cntThreads = nThreads;
-
 	}
 
-	public void sendRequest() {
+	public AtomicBoolean sendRequest() {
+		AtomicBoolean flag = new AtomicBoolean(true);
+		ExecutorService executor = Executors.newFixedThreadPool(cntThreads);
 		for (int i = 1; i <= cntThreads; i++) {
-			int threadNum = i ;
-			new Thread(() -> {
+			int threadNum = i;
+			executor.submit(()->{
 				HashMap<String, Object> map = new HashMap<>();
-				map.put("线程号", threadNum);
+				map.put("threadNumber", threadNum);
 				String result = "";
 				boolean success = true;
 				String reasonIfFail = "";
@@ -45,12 +47,27 @@ public class MultiThreadPost {
 						TimeUnit.NANOSECONDS);
 				if (timeSpentNano > threadNum * 1e9) {
 					success = false;
-					reasonIfFail = "超时";
+					if(flag.get()){
+						flag.set(false);
+					}
+					reasonIfFail = "timeout";
 				}
-				LOGGER.info("线程{}请求耗时{}秒,请求{}", threadNum, timeSpentSec,
-						success ? "成功,返回值为：" + result : "失败,原因是：" + reasonIfFail);
-			}).start();
+				// 对请求状态进行判断，如果发送失败，将flag设置为false返回。
+				//LOGGER.info("Thread {} take {} seconds, request was {}", threadNum, timeSpentSec,
+						//success ? "successful, returned value is ：" + result : "failed, the reason is ：" + reasonIfFail);
+				if(!success) {
+					LOGGER.info("Thread {} take {} seconds, request was {}", threadNum, timeSpentSec,
+						"failed, the reason is ：" + reasonIfFail);
+				}
+			});
 		}
+		executor.shutdown();
+		try {
+			executor.awaitTermination(6, TimeUnit.MINUTES);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+		return flag;
 	}
 
 	public int getCntThreads() {
@@ -62,8 +79,14 @@ public class MultiThreadPost {
 	}
 
 	public static void main(String[] args) {
-		MultiThreadPost post = new MultiThreadPost(10);
-		post.sendRequest();
+		MultiThreadPost post = new MultiThreadPost(1000);
+		AtomicBoolean atomicBoolean = post.sendRequest();
+
+		if(atomicBoolean.get()){
+			System.out.println("All requests were successful!");
+		} else {
+			System.out.println("Some requests were failed, See the jbit.log file for more information...");
+		}
 	}
 
 }
